@@ -1,69 +1,81 @@
-<script>
+<!-- src/routes/+page.svelte -->
+<script lang="ts">
   import { onMount } from 'svelte';
-  import io from 'socket.io-client';
+  import { io } from 'socket.io-client';
 
-  let socket;
-  let roomId = 'default-room'; // bisa ganti nanti
-  let audio;
-  let isHost = false;
-  let currentTime = 0;
+  const socket = io('https://yottabytebackend-production.up.railway.app');
+  const roomId = 'byteSpace';
+
+  let audioRef: HTMLAudioElement;
+  let isHost = false; // ganti manual jadi true untuk menguji sebagai host
+  let currentAction = 'pause';
 
   onMount(() => {
-    socket = io('yottabytebackend-production.up.railway.app'); // ganti URL ini
-
     socket.emit('join-room', roomId);
 
-    socket.on('sync-play', (timestamp) => {
+    socket.on('sync-state', ({ action, timestamp }) => {
+      console.log('🔁 Sync state:', action, timestamp);
       if (!isHost) {
-        audio.currentTime = timestamp;
-        audio.play();
+        syncToState(action, timestamp);
       }
     });
 
-    socket.on('sync-pause', (timestamp) => {
+    socket.on('player-action', ({ action, timestamp }) => {
+      console.log('🎧 Received action:', action, timestamp);
       if (!isHost) {
-        audio.currentTime = timestamp;
-        audio.pause();
-      }
-    });
-
-    socket.on('sync-time', (timestamp) => {
-      if (!isHost) {
-        audio.currentTime = timestamp;
+        syncToState(action, timestamp);
       }
     });
   });
 
-  function handlePlay() {
-    isHost && socket.emit('sync-play', { roomId, timestamp: audio.currentTime });
+  function syncToState(action: string, timestamp: number) {
+    if (!audioRef) return;
+
+    audioRef.currentTime = timestamp;
+
+    if (action === 'play') {
+      audioRef.play();
+    } else if (action === 'pause') {
+      audioRef.pause();
+    }
+    currentAction = action;
   }
 
-  function handlePause() {
-    isHost && socket.emit('sync-pause', { roomId, timestamp: audio.currentTime });
-  }
+  function handlePlayPause() {
+    if (!audioRef) return;
 
-  function toggleHost() {
-    isHost = !isHost;
+    const action = audioRef.paused ? 'play' : 'pause';
+    const timestamp = audioRef.currentTime;
+
+    audioRef[action]();
+    currentAction = action;
+
+    socket.emit('player-action', { roomId, action, timestamp });
   }
 </script>
 
+<svelte:window on:keydown={(e) => {
+  if (e.key === ' ') {
+    e.preventDefault();
+    handlePlayPause();
+  }
+}} />
+
+<main class="flex flex-col items-center justify-center h-screen gap-4 bg-gray-100 text-gray-800">
+  <h1 class="text-2xl font-bold">🎵 ByteSpace Music Player</h1>
+
+  <audio bind:this={audioRef} class="w-full max-w-md" controls>
+    <source src="/sample.mp3" type="audio/mp3" />
+    Your browser does not support the audio element.
+  </audio>
+
+  <button on:click={handlePlayPause} class="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 transition">
+    {currentAction === 'play' ? '⏸ Pause' : '▶️ Play'} (as {isHost ? 'Host' : 'Client'})
+  </button>
+</main>
+
 <style>
-  audio {
-    width: 100%;
-    margin-top: 1rem;
+  audio::-webkit-media-controls-panel {
+    background-color: #f0f0f0;
   }
 </style>
-
-<h1>ByteDance x ByteSpace 🎧</h1>
-<p>Room ID: {roomId}</p>
-<button on:click={toggleHost}>
-  {isHost ? 'You are HOST' : 'Become Host'}
-</button>
-
-<audio
-  bind:this={audio}
-  src="https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3"
-  on:play={handlePlay}
-  on:pause={handlePause}
-  controls
-></audio>
